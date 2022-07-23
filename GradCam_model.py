@@ -7,13 +7,31 @@ import torchvision as trv
 from PIL import Image
 import cv2
 
+
 class GradResnet50(nn.Module):
     def __init__(self):
         super(GradResnet50, self).__init__()
         self.model = trv.models.resnet50(weights=trv.models.ResNet50_Weights.IMAGENET1K_V2)
         self.gradients = None
+        self.transform = self.transform_obj()
+        
+    def transform_obj(self):
+        transform = trv.transforms.Compose([
+            trv.transforms.Resize(256),
+            trv.transforms.CenterCrop(224),
+            trv.transforms.ToTensor(),
+            trv.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                    ])
+        return transform
+    
+    def preprocess(self, img):
+        img = self.transform(img)
+        input_tensor = torch.unsqueeze(img, axis=0)
+        return input_tensor
         
     def forward(self, x):
+        x = self.preprocess(x)
+        
         x = self.model.conv1(x)
         x = self.model.bn1(x)
         x = self.model.relu(x)
@@ -39,6 +57,8 @@ class GradResnet50(nn.Module):
     
     # method for the activation exctraction
     def get_activations(self, x):
+        x = self.preprocess(x)
+        
         x = self.model.conv1(x)
         x = self.model.bn1(x)
         x = self.model.relu(x)
