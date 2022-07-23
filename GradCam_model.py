@@ -48,14 +48,9 @@ class GradResnet50(nn.Module):
         x = self.model.fc(x)
         return x 
         
-    # hook for the gradients of the activations
     def activations_hook(self, grad):
         self.gradients = grad
     
-    def get_activations_gradient(self):
-        return self.gradients
-    
-    # method for the activation exctraction
     def get_activations(self, x):
         x = self.preprocess(x)
         
@@ -68,4 +63,38 @@ class GradResnet50(nn.Module):
         x = self.model.layer3(x)
         x = self.model.layer4(x)
         return x
+    
+    def Normalize_img(self, heatmap):
+        heatmap = torch.mean(heatmap, dim=1).squeeze()
+        heatmap = np.maximum(heatmap, 0)
+        heatmap /= torch.max(heatmap)
+        return heatmap
+    
+    def postprocess(self, heatmap):
+        heatmap = trv.transforms.Resize(224)(torch.unsqueeze(heatmap, axis=0))
+        heatmap = torch.nn.functional.pad(heatmap, (16, 16, 16, 16, 0, 0), value=0.)
+        heatmap = heatmap.squeeze()
+        return heatmap
+    
+    def Gradheatmap(self, x):
+        self.zero_grad()
+        pred = self.__call__(x)
+        _, index = torch.max(pred, axis=1)
+        pred[:, index].backward()
+        
+        gradients = self.gradients
+        pooled_gradients = torch.mean(gradients, dim=[0, 2, 3])
+        activations = self.get_activations(x).detach()
+        
+        batch_size = activations.shape[0]
+        depth = activations.shape[1]
+        
+        heatmap = activations * torch.reshape(pooled_gradients, (batch_size, depth, 1, 1))
+        # for i in range(2048):
+        #     activations[:, i, :, :] *= pooled_gradients[i]
+        heatmap = self.Normalize_img(heatmap)
+        
+        heatmap = self.postprocess(heatmap)
+        
+        return heatmap
     
