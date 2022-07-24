@@ -14,7 +14,11 @@ class GradResnet50(nn.Module):
         self.model = trv.models.resnet50(weights=trv.models.ResNet50_Weights.IMAGENET1K_V2)
         self.gradients = None
         self.transform = self.transform_obj()
-        
+        self.img_width = 0
+        self.img_height = 0
+        self.eval()
+    
+    #Original Preprocess in ResNet50
     def transform_obj(self):
         transform = trv.transforms.Compose([
             trv.transforms.Resize(256),
@@ -30,6 +34,9 @@ class GradResnet50(nn.Module):
         return input_tensor
         
     def forward(self, x):
+        
+        self.img_width, self.img_height = x.size
+        
         x = self.preprocess(x)
         
         x = self.model.conv1(x)
@@ -70,12 +77,22 @@ class GradResnet50(nn.Module):
         heatmap /= torch.max(heatmap)
         return heatmap
     
+    #Resize to 224 and Pad to 256
     def postprocess(self, heatmap):
         heatmap = trv.transforms.Resize(224)(torch.unsqueeze(heatmap, axis=0))
         heatmap = torch.nn.functional.pad(heatmap, (16, 16, 16, 16, 0, 0), value=0.)
         heatmap = heatmap.squeeze()
+        heatmap = np.uint8(255 * heatmap)
+        heatmap = cv2.resize(heatmap, (self.img_width, self.img_height))
         return heatmap
     
+    #Convert to RGB
+    def Colorize_heatmat(self, heatmap):
+        heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
+        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+        return heatmap
+    
+    #Gen heatmap
     def Gradheatmap(self, x):
         self.zero_grad()
         pred = self.__call__(x)
@@ -86,15 +103,10 @@ class GradResnet50(nn.Module):
         pooled_gradients = torch.mean(gradients, dim=[0, 2, 3])
         activations = self.get_activations(x).detach()
         
-        batch_size = activations.shape[0]
-        depth = activations.shape[1]
-        
-        heatmap = activations * torch.reshape(pooled_gradients, (batch_size, depth, 1, 1))
-        # for i in range(2048):
-        #     activations[:, i, :, :] *= pooled_gradients[i]
+        heatmap = activations * torch.reshape(pooled_gradients, (*activations.shape[:2], 1, 1))
         heatmap = self.Normalize_img(heatmap)
-        
         heatmap = self.postprocess(heatmap)
+        heatmap = self.Colorize_heatmat(heatmap)
         
         return heatmap
     
